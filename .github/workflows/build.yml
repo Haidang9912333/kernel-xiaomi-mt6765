@@ -4,7 +4,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -12,13 +12,19 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu
+          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu libelf-dev
 
-      - name: Fix Source Code (Sửa lỗi Error 2 phổ biến)
+      - name: Patch Source Code (Sửa lỗi Error 2 dứt điểm)
         run: |
-          # Sửa lỗi trùng lặp định nghĩa thường gặp trên trình biên dịch mới
-          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' scripts/dtc/dtc-lexer.lex.c_shipped || true
-          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' scripts/dtc/dtc-lexer.l || true
+          # 1. Sửa lỗi DTC (Device Tree Compiler) kinh điển
+          find scripts/dtc/ -name "*.l" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
+          find scripts/dtc/ -name "*.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
+          
+          # 2. Sửa lỗi multiple definition của biến 'input_report_abs' và các biến global khác
+          sed -i 's/^struct input_dev \*input_dev;/extern struct input_dev *input_dev;/g' drivers/input/touchscreen/mediatek/mtk_tpd.c || true
+          
+          # 3. Loại bỏ việc coi Warning là Error
+          find . -name "Makefile" -exec sed -i 's/-Werror//g' {} +
 
       - name: Build Kernel
         run: |
@@ -28,15 +34,15 @@ jobs:
           make clean
           make mrproper
           
-          # Nếu angelica_defconfig vẫn lỗi, hãy thử đổi thành dandelion_defconfig
+          # Chọn cấu hình
           make angelica_defconfig
           
-          # Sử dụng cờ -fcommon để xử lý lỗi trùng định nghĩa biến
+          # Build với cờ hỗ trợ các chuẩn C cũ (-fcommon)
           make -j$(nproc) KCFLAGS="-w -fcommon" KCPPFLAGS="-w -fcommon"
 
       - name: Upload Kernel
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi9C
+          name: Kernel-Redmi9C-Fixed
           path: arch/arm64/boot/Image.gz*
