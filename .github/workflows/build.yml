@@ -4,22 +4,32 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Install Dependencies
+      - name: Setup Build Environment
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev gcc-aarch64-linux-gnu
+          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync
+          # Tải Toolchain chuẩn từ Google thay vì dùng bản mặc định của Ubuntu
+          git clone --depth=1 https://github.com/lineageos/android_prebuilts_gcc_linux-x86_aarch64_binutils-2.27 aarch64-linux-android-4.9
 
       - name: Build Kernel
         run: |
+          export PATH=$(pwd)/aarch64-linux-android-4.9/bin:$PATH
           export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
+          
+          # Nếu angelica_defconfig vẫn lỗi, hãy thử dandelion_defconfig
           make angelica_defconfig
-          make -j$(nproc)
+          
+          # Chạy build và bỏ qua các cảnh báo nhỏ có thể gây dừng build
+          make -j$(nproc) || make -j1
+
+      - name: Check Output
+        run: ls -l arch/arm64/boot/
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
