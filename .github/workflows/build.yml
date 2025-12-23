@@ -4,35 +4,37 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Setup Build Environment
+      - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync
-          # Tải Toolchain chuẩn từ Google thay vì dùng bản mặc định của Ubuntu
-          git clone --depth=1 https://github.com/lineageos/android_prebuilts_gcc_linux-x86_aarch64_binutils-2.27 aarch64-linux-android-4.9
+          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu
 
       - name: Build Kernel
         run: |
-          export PATH=$(pwd)/aarch64-linux-android-4.9/bin:$PATH
           export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE=aarch64-linux-gnu-
           
-          # Nếu angelica_defconfig vẫn lỗi, hãy thử dandelion_defconfig
+          # Dọn dẹp môi trường
+          make clean
+          make mrproper
+          
+          # Cấu hình cho Redmi 9C
           make angelica_defconfig
           
-          # Chạy build và bỏ qua các cảnh báo nhỏ có thể gây dừng build
-          make -j$(nproc) || make -j1
+          # BUILD VỚI CÁC CỜ BỎ QUA LỖI (Quan trọng để tránh Error 2)
+          # K_CFLAGS giúp bỏ qua các lỗi về định dạng và khai báo trùng lặp của code cũ
+          make -j$(nproc) KCFLAGS="-w -fcommon" KCPPFLAGS="-w -fcommon"
 
       - name: Check Output
         run: ls -l arch/arm64/boot/
 
-      - name: Upload Result
-        uses: actions/upload-artifact@v4
+      - name: Upload Kernel
+        uses: actions/upload-artifact@v3
         with:
           name: Kernel-Image
-          path: arch/arm64/boot/Image.gz-dtb
+          path: arch/arm64/boot/Image.gz*
