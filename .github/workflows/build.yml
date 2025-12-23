@@ -5,34 +5,37 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Sử dụng Docker container có môi trường build chuẩn của đời cũ
-    container:
-      image: ghcr.io/ncl-knight/kernel-builder:latest
-
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu
+
+      - name: Fix Source Code (Sửa lỗi Error 2 phổ biến)
+        run: |
+          # Sửa lỗi trùng lặp định nghĩa thường gặp trên trình biên dịch mới
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' scripts/dtc/dtc-lexer.lex.c_shipped || true
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' scripts/dtc/dtc-lexer.l || true
 
       - name: Build Kernel
         run: |
-          # Thiết lập môi trường biên dịch bên trong container
           export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-android-
-          export PATH="/root/toolchains/aarch64-linux-android-4.9/bin:$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
           
           make clean
           make mrproper
           
-          # Thử cấu hình máy (Nếu angelica_defconfig lỗi thì thử dandelion_defconfig)
+          # Nếu angelica_defconfig vẫn lỗi, hãy thử đổi thành dandelion_defconfig
           make angelica_defconfig
           
-          # Ép build với trình biên dịch cũ bên trong Docker
-          make -j$(nproc)
-          
-      - name: Check Output
-        run: ls -l arch/arm64/boot/ || echo "Build failed"
+          # Sử dụng cờ -fcommon để xử lý lỗi trùng định nghĩa biến
+          make -j$(nproc) KCFLAGS="-w -fcommon" KCPPFLAGS="-w -fcommon"
 
       - name: Upload Kernel
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-Redmi9C
