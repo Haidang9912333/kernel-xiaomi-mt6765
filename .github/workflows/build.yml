@@ -1,0 +1,28 @@
+name: Build Kernel Redmi 9C
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev gcc-aarch64-linux-gnu
+
+      - name: Build Kernel
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make angelica_defconfig
+          make -j$(nproc)
+
+      - name: Upload Result
+        uses: actions/upload-artifact@v3
+        with:
+          name: Kernel-Image
+          path: arch/arm64/boot/Image.gz-dtb
