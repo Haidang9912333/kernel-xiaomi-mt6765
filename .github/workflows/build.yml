@@ -4,7 +4,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -12,37 +12,39 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu libelf-dev
+          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync libelf-dev
 
-      - name: Patch Source Code (Sửa lỗi Error 2 dứt điểm)
+      - name: Download Google GCC 4.9 Toolchain
         run: |
-          # 1. Sửa lỗi DTC (Device Tree Compiler) kinh điển
-          find scripts/dtc/ -name "*.l" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
-          find scripts/dtc/ -name "*.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
-          
-          # 2. Sửa lỗi multiple definition của biến 'input_report_abs' và các biến global khác
-          sed -i 's/^struct input_dev \*input_dev;/extern struct input_dev *input_dev;/g' drivers/input/touchscreen/mediatek/mtk_tpd.c || true
-          
-          # 3. Loại bỏ việc coi Warning là Error
-          find . -name "Makefile" -exec sed -i 's/-Werror//g' {} +
+          # Tải bộ biên dịch chuẩn mà Xiaomi/MediaTek yêu cầu
+          git clone --depth=1 https://github.com/lineageos/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 toolchain
+
+      - name: Fix DTC Source (Lỗi scripts/dtc)
+        run: |
+          # Sửa lỗi YYLOC thường gặp khi dùng máy ảo mới
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' scripts/dtc/dtc-lexer.lex.c_shipped || true
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' scripts/dtc/dtc-lexer.l || true
 
       - name: Build Kernel
         run: |
           export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE=$(pwd)/toolchain/bin/aarch64-linux-android-
           
           make clean
           make mrproper
           
-          # Chọn cấu hình
+          # Cấu hình máy
           make angelica_defconfig
           
-          # Build với cờ hỗ trợ các chuẩn C cũ (-fcommon)
-          make -j$(nproc) KCFLAGS="-w -fcommon" KCPPFLAGS="-w -fcommon"
+          # Build với bộ biên dịch cũ
+          make -j$(nproc) KCFLAGS="-w -fcommon"
+          
+      - name: Check Artifacts
+        run: ls -R arch/arm64/boot/
 
       - name: Upload Kernel
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi9C-Fixed
+          name: Kernel-Redmi9C-Ready
           path: arch/arm64/boot/Image.gz*
