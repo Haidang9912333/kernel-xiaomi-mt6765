@@ -1,6 +1,6 @@
-name: Build Kernel Redmi 9C Docker Native
+name: Build Kernel Redmi 9C Docker (Auto-AI-Fix)
 on:
-  workflow_dispatch: # Chạy thủ công
+  workflow_dispatch:
 
 jobs:
   build:
@@ -9,33 +9,31 @@ jobs:
       - name: Checkout Source
         uses: actions/checkout@v3
 
-      - name: Cai dat Toolchain & Dependencies
+      - name: 1. Tu dong cai dat moi truong (Fix loi Locate Package)
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm aarch64-linux-gnu-gcc python3 git
-          # Tai Clang Proton - Bo bien dich tot nhat cho Kernel 4.19
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi python3 git
+
+      - name: 2. Setup Toolchain (Proton Clang)
+        run: |
           git clone --depth=1 https://github.com/kdrag0n/proton-clang clang-proton
 
-      - name: AI Auto-Fix & Patching (Sua loi Source)
+      - name: 3. AI-Auto-Fix (He thong tu sua loi code)
         run: |
-          # 1. Sua loi DTC Lexer (Loi khien build dung ngay lap tuc)
+          # Tu sua cac file loi cu phap dac thu cua Redmi 9C
           find . -name "dtc-lexer.lex.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
           find . -name "dtc-lexer.l" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
           
-          # 2. Xoa tat ca -Werror (Khong cho phep Warning lam dung build)
+          # Xoa bo tat ca cac lenh bat loi khat khe (-Werror)
           find . -type f -name "Makefile" -exec sed -i 's/-Werror//g' {} +
           find . -type f -name "Kbuild" -exec sed -i 's/-Werror//g' {} +
-          
-          # 3. Sua loi khai bao bien trung lap tren MediaTek
-          sed -i '/^YYLTYPE yylloc;/d' scripts/dtc/dtc-lexer.lex.c_shipped || true
 
-      - name: Config & Enable Docker
+      - name: 4. Tu dong bat Config Docker
         run: |
           export ARCH=arm64
-          # Buoc nay tao file .config tu file mac dinh cua may
           make O=out angelica_defconfig
           
-          # Ep buoc bat cac config ban da chon (Dam bao 100% bat)
+          # Bat cac thong so ban can
           ./scripts/config --file out/.config --enable CONFIG_CGROUPS
           ./scripts/config --file out/.config --enable CONFIG_CGROUP_DEVICE
           ./scripts/config --file out/.config --enable CONFIG_CGROUP_FREEZER
@@ -44,31 +42,30 @@ jobs:
           ./scripts/config --file out/.config --enable CONFIG_USER_NS
           ./scripts/config --file out/.config --enable CONFIG_OVERLAY_FS
           
-          # Lam moi lai config de tranh xung dot
+          # He thong tu kiem tra va sua lai config cho khop
           make O=out ARCH=arm64 olddefconfig
 
-      - name: Start Make (Force Build)
+      - name: 5. Start Make (Che do tu va loi khi build)
         run: |
           export PATH=$(pwd)/clang-proton/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # Chay build voi cac co bo qua moi loi vặt
+          # Chạy build và tự động thử lại nếu lỗi
           make -j$(nproc) O=out \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             DTC_EXT=dtc \
-            KCFLAGS="-w -fno-stack-protector -Wno-error -Wno-misleading-indentation" \
+            KCFLAGS="-w -fno-stack-protector -Wno-error" \
             HOSTCFLAGS="-w" \
-            HOSTLDFLAGS="-fuse-ld=lld" || \
-            (echo "Loi xay ra, dang thu build lai voi j1 de xac dinh loi..." && make -j1 O=out CC=clang CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="-w")
+            HOSTLDFLAGS="-fuse-ld=lld" || (echo "Phat hien loi, dang tu dong build lai voi j1..." && make -j1 O=out CC=clang CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="-w")
 
-      - name: Upload Kernel
+      - name: 6. Luu file Image
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Docker-Redmi9C
+          name: Kernel-Redmi9C-Docker
           path: |
             out/arch/arm64/boot/Image.gz-dtb
             out/.config
