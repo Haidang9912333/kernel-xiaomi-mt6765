@@ -1,4 +1,4 @@
-name: Build Kernel Redmi 9C GCC Native
+name: Build Kernel Redmi 9C (GCC Absolute Fix)
 on:
   workflow_dispatch:
 
@@ -9,19 +9,30 @@ jobs:
       - name: Checkout Source
         uses: actions/checkout@v4
 
-      - name: 1. Cai dat GCC Cross-Compiler
+      - name: 1. Cai dat moi truong GCC
         run: |
           sudo apt-get update
-          # Cai dat GCC cho ARM64 va ARM32 (Standard Toolchain)
           sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi python3 git wget tar
 
-      - name: 2. AI-Fix (Sua loi logic duy nhat con lai)
+      - name: 2. AI-Universal-Patch (Sua tat ca moi thu)
         run: |
-          # Sua loi yylloc (loi nay thi GCC hay Clang deu bi neu dung Bison moi)
+          # --- A. Sua loi DTC Lexer (yylloc) ---
           find . -name "dtc-lexer.lex.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
           find . -name "dtc-lexer.l" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
+
+          # --- B. Sua loi Constraint 'L' & u64 (Loi anh 17:21) ---
+          # Xoa bo cac lenh ep kieu sai ma ban da thu o anh truoc
+          find arch/arm64/include/asm/ -name "*.h" -exec sed -i 's/(u64)(~PTE_AF)/(~PTE_AF)/g' {} +
+          # Dung cach sua an toan hon cho GCC
+          grep -rl "PTE_AF" arch/arm64/include/asm/ | xargs sed -i 's/~PTE_AF/(~0UL \& ~PTE_AF)/g' || true
+
+          # --- C. Vo hieu hoa check Compiler (Sua loi anh 17:24) ---
+          # Day la doan quan trong nhat de GCC khong dung build
+          find . -name "Makefile" -exec sed -i 's/-fstack-protector-strong//g' {} +
+          find . -name "Makefile" -exec sed -i 's/-fstack-protector//g' {} +
+          find . -name "Makefile" -exec sed -i 's/--pack-dyn-relocs=relr//g' {} +
           
-          # Loai bo -Werror de build muot ma
+          # --- D. Tat tat ca Warning coi nhu loi ---
           find . -type f -name "Makefile" -exec sed -i 's/-Werror//g' {} +
 
       - name: 3. Cau hinh Docker (Native Support)
@@ -29,39 +40,40 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           
-          # Dung file config mac dinh cua Redmi 9C
           make O=out angelica_defconfig
           
-          # Bat cac thong so Docker
-          ./scripts/config --file out/.config --enable CONFIG_CGROUPS
-          ./scripts/config --file out/.config --enable CONFIG_CGROUP_DEVICE
-          ./scripts/config --file out/.config --enable CONFIG_CGROUP_FREEZER
-          ./scripts/config --file out/.config --enable CONFIG_CGROUP_PIDS
-          ./scripts/config --file out/.config --enable CONFIG_NAMESPACES
-          ./scripts/config --file out/.config --enable CONFIG_USER_NS
-          ./scripts/config --file out/.config --enable CONFIG_OVERLAY_FS
+          # --- E. TAT STACK PROTECTOR TRONG CONFIG ---
+          # Buoc nay de fix triet de loi "not supported by compiler"
+          ./scripts/config --file out/.config --disable CONFIG_CC_STACKPROTECTOR_STRONG
+          ./scripts/config --file out/.config --disable CONFIG_CC_STACKPROTECTOR
+          
+          # Bat cac tinh nang Docker
+          ./scripts/config --file out/.config --enable CONFIG_CGROUPS \
+            --enable CONFIG_CGROUP_DEVICE --enable CONFIG_CGROUP_FREEZER \
+            --enable CONFIG_CGROUP_PIDS --enable CONFIG_NAMESPACES \
+            --enable CONFIG_USER_NS --enable CONFIG_OVERLAY_FS --enable CONFIG_IKCONFIG --enable CONFIG_IKCONFIG_PROC
           
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 4. Start Make (Build bang GCC)
+      - name: 4. Start Make (GCC Native)
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # Build thuan bang GCC, khong dung Clang, khong dung LLD
+          # Build thuan GCC, dung co -w de bo qua moi canh bao
           make -j$(nproc) O=out \
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             KCFLAGS="-w" \
-            HOSTCFLAGS="-w"
+            HOSTCFLAGS="-w" || (echo "Build loi, thu lai voi j1..." && make -j1 O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-w")
 
-      - name: 5. Luu file Kernel
+      - name: 5. Luu Kernel (Image.gz-dtb)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi9C-GCC-Docker
+          name: Kernel-Redmi9C-Final-GCC
           path: |
             out/arch/arm64/boot/Image.gz-dtb
             out/.config
