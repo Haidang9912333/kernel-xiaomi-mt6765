@@ -1,82 +1,67 @@
-name: Build Kernel Redmi 9C Docker (AI-Ultimate-Fix)
+name: Build Kernel Redmi 9C GCC Native
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # Dung ban 22.04 de tranh loi linker moi o anh 2
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
 
-      - name: 1. Cai dat moi truong (Fix loi Anh 1)
+      - name: 1. Cai dat GCC Cross-Compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi python3 git wget tar
+          # Cai dat GCC cho ARM64 va ARM32 (Standard Toolchain)
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi python3 git wget tar
 
-      - name: 2. Setup Toolchain (Fix loi Anh 3 - Bad Request)
+      - name: 2. AI-Fix (Sua loi logic duy nhat con lai)
         run: |
-          # Dung Proton Clang qua Git de tranh loi link tai HTTP 400
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang-bin
-
-      - name: 3. AI-Super-Patch (Sua loi o Anh 2, 4, 5, 6)
-        run: |
-          # --- A. Sua loi yylloc (DTC) ---
+          # Sua loi yylloc (loi nay thi GCC hay Clang deu bi neu dung Bison moi)
           find . -name "dtc-lexer.lex.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
           find . -name "dtc-lexer.l" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
+          
+          # Loai bo -Werror de build muot ma
+          find . -type f -name "Makefile" -exec sed -i 's/-Werror//g' {} +
 
-          # --- B. Sua loi Constraint 'L' (Fix loi Anh 5) ---
-          # Ep kieu du lieu de compiler Clang khong bao loi tran vung nho pgtable
-          find arch/arm64/include/asm/ -name "*.h" -exec sed -i 's/(~PTE_AF)/(u64)(~PTE_AF)/g' {} +
-          find arch/arm64/include/asm/ -name "*.h" -exec sed -i 's/(~PTE_WRITE)/(u64)(~PTE_WRITE)/g' {} +
-          find arch/arm64/include/asm/ -name "*.h" -exec sed -i 's/(~PTE_DIRTY)/(u64)(~PTE_DIRTY)/g' {} +
-
-          # --- C. Sua loi Flag & Linker (Fix loi Anh 2, 4, 6) ---
-          find . -name "Makefile" -exec sed -i 's/-Werror//g' {} +
-          find . -name "Makefile" -exec sed -i 's/--pack-dyn-relocs=relr//g' {} +
-          # Xoa cac flag ma Clang 13+ khong hieu (Fix Anh 6)
-          find . -name "Makefile" -exec sed -i 's/-fstack-protector-strong//g' {} +
-          find . -name "Makefile" -exec sed -i 's/-implicit-function-declaration//g' {} +
-          find . -name "Makefile" -exec sed -i 's/-Wno-unused-but-set-variable//g' {} +
-
-      - name: 4. Cau hinh Docker & Tat Stack Protector (Fix Anh 5)
+      - name: 3. Cau hinh Docker (Native Support)
         run: |
           export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          
+          # Dung file config mac dinh cua Redmi 9C
           make O=out angelica_defconfig
           
-          # Tat Stack Protector gay dung build o Anh 5
-          ./scripts/config --file out/.config --disable CONFIG_CC_STACKPROTECTOR_STRONG
-          ./scripts/config --file out/.config --disable CONFIG_CC_STACKPROTECTOR
-          
-          # Bat config Docker
-          ./scripts/config --file out/.config --enable CONFIG_CGROUPS \
-            --enable CONFIG_CGROUP_DEVICE --enable CONFIG_CGROUP_FREEZER \
-            --enable CONFIG_CGROUP_PIDS --enable CONFIG_NAMESPACES \
-            --enable CONFIG_USER_NS --enable CONFIG_OVERLAY_FS --enable CONFIG_IKCONFIG --enable CONFIG_IKCONFIG_PROC
+          # Bat cac thong so Docker
+          ./scripts/config --file out/.config --enable CONFIG_CGROUPS
+          ./scripts/config --file out/.config --enable CONFIG_CGROUP_DEVICE
+          ./scripts/config --file out/.config --enable CONFIG_CGROUP_FREEZER
+          ./scripts/config --file out/.config --enable CONFIG_CGROUP_PIDS
+          ./scripts/config --file out/.config --enable CONFIG_NAMESPACES
+          ./scripts/config --file out/.config --enable CONFIG_USER_NS
+          ./scripts/config --file out/.config --enable CONFIG_OVERLAY_FS
           
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 5. Start Make (Native Build)
+      - name: 4. Start Make (Build bang GCC)
         run: |
-          export PATH=$(pwd)/clang-bin/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # Su dung flags bo qua loi vặt (Anh 6)
+          # Build thuan bang GCC, khong dung Clang, khong dung LLD
           make -j$(nproc) O=out \
-            CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            LD=ld.lld \
-            KBUILD_CFLAGS="-w -fno-stack-protector -Wno-error" \
-            HOSTCFLAGS="-w" \
-            HOSTLDFLAGS="-fuse-ld=lld" || (echo "Build loi, dang thu lai voi j1..." && make -j1 O=out CC=clang CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld KCFLAGS="-w")
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-w" \
+            HOSTCFLAGS="-w"
 
-      - name: 6. Luu Kernel (Image.gz-dtb)
+      - name: 5. Luu file Kernel
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi9C-Docker
+          name: Kernel-Redmi9C-GCC-Docker
           path: |
             out/arch/arm64/boot/Image.gz-dtb
             out/.config
