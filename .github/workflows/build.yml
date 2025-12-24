@@ -1,4 +1,4 @@
-name: Build Kernel Redmi 9C Docker (Ubuntu 22.04 Fix)
+name: Build Kernel Redmi 9C Docker (Auto-Fix-All)
 on:
   workflow_dispatch:
 
@@ -14,31 +14,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi python3 git wget tar
 
-      - name: 2. Setup AOSP Clang (Fix Incompatible Libc)
+      - name: 2. Setup Toolchain (Fix 400 Bad Request)
         run: |
-          # Su dung ban Clang r450784d on dinh nhat cho Android 11-13
-          mkdir clang
-          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r450784d.tar.gz
-          tar -C clang -xf clang-r450784d.tar.gz
-          # Tu dong xoa cac thu vien trung lap gay loi link
-          rm -rf clang/lib64/libc++.so*
+          # Su dung Proton Clang ban moi nhat, link nay cuc ky on dinh tren GitHub
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang-bin
 
-      - name: 3. AI-Auto-Fix (Sua loi Linker & Source)
+      - name: 3. AI-Auto-Fix (Sua loi Linker .relr.dyn & Source)
         run: |
-          # Sua loi yylloc kinh dien
+          # Sua loi yylloc kinh dien cua MediaTek
           find . -name "dtc-lexer.lex.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
-          # Ep buoc xoa -Werror trong toan bo project
+          
+          # TRIET TIEU LOI .relr.dyn (Fix loi exit code 1 trong anh cua ban)
+          # Lenh nay se ep Linker khong dung dinh dang moi ma Kernel 4.19 khong hieu
+          find . -name "Makefile" -exec sed -i 's/LDFLAGS_MODULE +=/LDFLAGS_MODULE += --no-relax --pack-dyn-relocs=none/g' {} +
+          find . -name "Makefile" -exec sed -i 's/LDFLAGS_vmlinux +=/LDFLAGS_vmlinux += --no-relax --pack-dyn-relocs=none/g' {} +
+          
+          # Xoa bo -Werror de khong bi dung build vi canh bao
           find . -type f -name "Makefile" -exec sed -i 's/-Werror//g' {} +
-          find . -type f -name "Kbuild" -exec sed -i 's/-Werror//g' {} +
-          # Sua loi khong tuong thich Elf Section
-          sed -i 's/$(LD) $(LDFLAGS)/$(LD) $(LDFLAGS) --no-relax/g' Makefile || true
 
       - name: 4. Tu dong bat Config Docker
         run: |
           export ARCH=arm64
           make O=out angelica_defconfig
           
-          # Bat cac config Docker
+          # Bat cac config Docker ban da yeu cau
           ./scripts/config --file out/.config --enable CONFIG_CGROUPS
           ./scripts/config --file out/.config --enable CONFIG_CGROUP_DEVICE
           ./scripts/config --file out/.config --enable CONFIG_CGROUP_FREEZER
@@ -49,32 +48,27 @@ jobs:
           
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 5. Start Make (Force Native Build)
+      - name: 5. Start Make (Native Build)
         run: |
-          export PATH=$(pwd)/clang/bin:$PATH
+          export PATH=$(pwd)/clang-bin/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # Su dung LLD de tranh loi "ld returned 1 exit status" trong anh cua ban
+          # Su dung cac flags de "va" loi tu dong khi dang build
           make -j$(nproc) O=out \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            KCFLAGS="-w -fno-stack-protector -D__ASSEMBLY__" \
+            KBUILD_CFLAGS="-w -O2 -fno-stack-protector -Wno-error" \
             HOSTCFLAGS="-w" \
-            HOSTLDFLAGS="-fuse-ld=lld"
+            HOSTLDFLAGS="-fuse-ld=lld -Wl,--no-relr-pack"
 
       - name: 6. Luu file Image
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi9C-Docker-U22
+          name: Kernel-Redmi9C-Docker-Ready
           path: |
             out/arch/arm64/boot/Image.gz-dtb
             out/.config
