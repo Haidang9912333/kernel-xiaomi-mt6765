@@ -1,10 +1,10 @@
-name: Build Kernel Redmi 9C
+name: Build Kernel Redmi 9C - Fix All Errors
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -12,18 +12,21 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync libelf-dev gcc-aarch64-linux-gnu
+          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu libelf-dev
 
-      - name: Force Patch Source (Sửa lỗi Error 2 dứt điểm)
+      - name: Super Patch (Chữa mọi lỗi Error 1 & 2)
         run: |
-          # 1. Sửa lỗi scripts/dtc (Nguyên nhân gây Error 2 phổ biến nhất)
-          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' scripts/dtc/dtc-lexer.lex.c_shipped || true
-          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' scripts/dtc/dtc-lexer.l || true
+          # 1. Sửa lỗi scripts/dtc (Lỗi Error 2 kinh điển)
+          find scripts/dtc/ -name "*.l" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
+          find scripts/dtc/ -name "*.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
           
-          # 2. Sửa lỗi 'multiple definition' cho các biến toàn cục
-          find . -type f -name "*.c" -exec sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
-          
-          # 3. Tắt chế độ "Coi cảnh báo là lỗi" trong toàn bộ mã nguồn
+          # 2. Vô hiệu hóa tính năng bảo mật gây lỗi (Error 1 dòng 62 trong ảnh của bạn)
+          # Chúng ta sẽ xóa sạch cấu hình cũ và thay bằng None
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/angelica_defconfig || true
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_REGULAR=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/angelica_defconfig || true
+          echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> arch/arm64/configs/angelica_defconfig
+
+          # 3. Ép mã nguồn không được dừng lại khi gặp Warning
           find . -name "Makefile" -exec sed -i 's/-Werror//g' {} +
           find . -name "Makefile" -exec sed -i 's/-Wfatal-errors//g' {} +
 
@@ -32,25 +35,20 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           
-          # Làm sạch hoàn toàn trước khi build
           make clean
           make mrproper
-          
-          # Bước này rất quan trọng: Ép nhận cấu hình
           make angelica_defconfig
           
-          # Thêm các cờ cực mạnh để trình biên dịch đời mới chấp nhận code đời cũ
-          # -fcommon: cho phép định nghĩa trùng tên biến
-          # -Wno-return-type: bỏ qua lỗi thiếu return
-          make -j$(nproc) KCFLAGS="-w -fcommon -Wno-return-type" KCPPFLAGS="-w -fcommon"
-
-      - name: Check Results
-        run: |
-          ls -R arch/arm64/boot/Image.gz* || echo "BUILD_FAILED"
+          # Ép tắt Stack Protector trong file .config tạm thời trước khi build
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' .config
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_REGULAR=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' .config
+          
+          # Build với cờ "Siêu mạnh" bỏ qua mọi rào cản trình biên dịch
+          make -j$(nproc) KCFLAGS="-w -fcommon -fno-stack-protector" KCPPFLAGS="-w -fcommon"
 
       - name: Upload Kernel
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi9C-Success
+          name: Kernel-Redmi9C-Fixed-Final
           path: arch/arm64/boot/Image.gz*
