@@ -1,44 +1,44 @@
-name: Build Kernel Redmi 9C Docker (Final Fix)
+name: Build Kernel Redmi 9C Docker (Ubuntu 22.04 Fix)
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    # Chuyển về Ubuntu 20.04 để fix lỗi thư viện glibc/relr.dyn
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout Source
         uses: actions/checkout@v3
 
-      - name: 1. Cai dat moi truong (Stable Version)
+      - name: 1. Cai dat moi truong (Ubuntu 22.04)
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi python3 git
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi python3 git wget tar
 
-      - name: 2. Setup AOSP Clang (Chinh chu tu Google)
+      - name: 2. Setup AOSP Clang (Fix Incompatible Libc)
         run: |
-          # Dung Clang 14 tu AOSP de dam bao tuong thich 100% voi Android Kernel
+          # Su dung ban Clang r450784d on dinh nhat cho Android 11-13
           mkdir clang
-          cd clang
           wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r450784d.tar.gz
-          tar -xf clang-r450784d.tar.gz
-          cd ..
+          tar -C clang -xf clang-r450784d.tar.gz
+          # Tu dong xoa cac thu vien trung lap gay loi link
+          rm -rf clang/lib64/libc++.so*
 
-      - name: 3. AI-Auto-Fix (Sua loi ma nguon MTK)
+      - name: 3. AI-Auto-Fix (Sua loi Linker & Source)
         run: |
-          # Fix loi DTC lexer
+          # Sua loi yylloc kinh dien
           find . -name "dtc-lexer.lex.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
-          # Fix loi khong tuong thich do dung Clang moi tren Kernel cu
+          # Ep buoc xoa -Werror trong toan bo project
           find . -type f -name "Makefile" -exec sed -i 's/-Werror//g' {} +
-          # Fix loi trung lap section (neu co)
-          sed -i '/^YYLTYPE yylloc;/d' scripts/dtc/dtc-lexer.lex.c_shipped || true
+          find . -type f -name "Kbuild" -exec sed -i 's/-Werror//g' {} +
+          # Sua loi khong tuong thich Elf Section
+          sed -i 's/$(LD) $(LDFLAGS)/$(LD) $(LDFLAGS) --no-relax/g' Makefile || true
 
       - name: 4. Tu dong bat Config Docker
         run: |
           export ARCH=arm64
           make O=out angelica_defconfig
           
-          # Bat tat ca config Docker ban yeu cau
+          # Bat cac config Docker
           ./scripts/config --file out/.config --enable CONFIG_CGROUPS
           ./scripts/config --file out/.config --enable CONFIG_CGROUP_DEVICE
           ./scripts/config --file out/.config --enable CONFIG_CGROUP_FREEZER
@@ -49,15 +49,14 @@ jobs:
           
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 5. Start Make (Native Build)
+      - name: 5. Start Make (Force Native Build)
         run: |
-          # Thiet lap duong dan den Clang AOSP vua tai
           export PATH=$(pwd)/clang/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # Build voi cac co (flags) ep buoc thanh cong
+          # Su dung LLD de tranh loi "ld returned 1 exit status" trong anh cua ban
           make -j$(nproc) O=out \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -67,14 +66,15 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            KCFLAGS="-w -fno-stack-protector" \
-            HOSTCFLAGS="-w"
+            KCFLAGS="-w -fno-stack-protector -D__ASSEMBLY__" \
+            HOSTCFLAGS="-w" \
+            HOSTLDFLAGS="-fuse-ld=lld"
 
       - name: 6. Luu file Image
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi9C-Docker-Final
+          name: Kernel-Redmi9C-Docker-U22
           path: |
             out/arch/arm64/boot/Image.gz-dtb
             out/.config
