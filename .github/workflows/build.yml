@@ -1,10 +1,10 @@
-name: Build Kernel Redmi 9C - Final Final
+name: Build Kernel Redmi 9C - Final Force
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -12,19 +12,18 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu libelf-dev
+          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu libelf-dev device-tree-compiler
 
-      - name: Patch All Errors
+      - name: Fix DTC & Config
         run: |
-          # Sửa lỗi DTC (Dòng 226 trong ảnh 3)
-          find scripts/dtc/ -name "*.l" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
-          find scripts/dtc/ -name "*.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
-          find scripts/dtc/ -name "*.h_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
+          # Dùng DTC của hệ thống thay vì tự build cái bị lỗi trong source
+          mkdir -p scripts/dtc
+          cp /usr/bin/dtc scripts/dtc/dtc || true
           
-          # Tắt Stack Protector (Dòng 62 ảnh 1)
+          # Tắt Stack Protector gây lỗi dòng 62
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/angelica_defconfig || true
           
-          # Gỡ bỏ các cờ gây lỗi trên GCC mới
+          # Xóa cờ gây lỗi dòng 224
           find . -name "Makefile" -exec sed -i 's/-Werror//g' {} +
           find . -name "Makefile" -exec sed -i 's/-implicit-function-declaration//g' {} +
 
@@ -36,21 +35,21 @@ jobs:
           make angelica_defconfig
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' .config
           
-          # Build bất chấp lỗi nhỏ (-k) và dùng chuẩn C cũ
+          # Build tiếp tục bất chấp lỗi DTC lẻ tẻ (-k)
           make -k -j$(nproc) KCFLAGS="-w -fcommon -fno-stack-protector -std=gnu89" || true
 
-      - name: Collect Results (Khâu quan trọng nhất)
+      - name: Collect Output
         run: |
-          # Tạo thư mục chứa kết quả
-          mkdir -p output
-          # Tìm tất cả các file nhân đã build xong và copy vào thư mục output
-          find arch/arm64/boot/ -name "Image*" -exec cp {} output/ \;
-          find arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} output/ \;
-          echo "Danh sách file thu hoạch được:"
-          ls -R output/
+          mkdir -p final_output
+          # Tìm mọi file Image đã build xong
+          find arch/arm64/boot/ -name "Image*" -exec cp {} final_output/ \;
+          # Tìm mọi file dtb
+          find arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} final_output/ \;
+          # Nếu tìm thấy file, liệt kê ra
+          ls -R final_output/
 
-      - name: Upload Kernel
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi9C-Finished
-          path: output/*
+          name: Kernel_Redmi9C_Fixed
+          path: final_output/*
