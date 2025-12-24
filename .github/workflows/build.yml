@@ -1,43 +1,45 @@
-name: Build Kernel Redmi 9C Docker (Auto-Fix-All)
+name: Build Kernel Redmi 9C Docker (Absolute Final)
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04 # Su dung ban 22.04 on dinh nhat
     steps:
       - name: Checkout Source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: 1. Cai dat moi truong (Ubuntu 22.04)
+      - name: 1. Cai dat moi truong (Fix Locate Package)
         run: |
           sudo apt-get update
           sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi python3 git wget tar
 
       - name: 2. Setup Toolchain (Fix 400 Bad Request)
         run: |
-          # Su dung Proton Clang ban moi nhat, link nay cuc ky on dinh tren GitHub
+          # Su dung Proton Clang qua Git clone de tranh loi link tai 400
           git clone --depth=1 https://github.com/kdrag0n/proton-clang clang-bin
 
-      - name: 3. AI-Auto-Fix (Sua loi Linker .relr.dyn & Source)
+      - name: 3. AI-Auto-Fix (Sua loi Source & Linker)
         run: |
-          # Sua loi yylloc kinh dien cua MediaTek
+          # Sua loi yylloc kinh dien khien build dung ngay tu dau
           find . -name "dtc-lexer.lex.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
           
-          # TRIET TIEU LOI .relr.dyn (Fix loi exit code 1 trong anh cua ban)
-          # Lenh nay se ep Linker khong dung dinh dang moi ma Kernel 4.19 khong hieu
-          find . -name "Makefile" -exec sed -i 's/LDFLAGS_MODULE +=/LDFLAGS_MODULE += --no-relax --pack-dyn-relocs=none/g' {} +
-          find . -name "Makefile" -exec sed -i 's/LDFLAGS_vmlinux +=/LDFLAGS_vmlinux += --no-relax --pack-dyn-relocs=none/g' {} +
+          # TRIET TIEU LOI .relr.dyn (Sua loi unknown type [0x13] trong anh cua ban)
+          # Thay vi dung flag, chung ta xoa bo yeu cau RELR ngay trong Makefile cua Kernel
+          find . -name "Makefile" -exec sed -i 's/-Werror//g' {} +
+          sed -i 's/--pack-dyn-relocs=relr//g' Makefile || true
+          sed -i 's/--pack-dyn-relocs=none//g' Makefile || true
           
-          # Xoa bo -Werror de khong bi dung build vi canh bao
-          find . -type f -name "Makefile" -exec sed -i 's/-Werror//g' {} +
+          # Fix loi scripts/dtc/dtc-lexer.l
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' scripts/dtc/dtc-lexer.l || true
 
       - name: 4. Tu dong bat Config Docker
         run: |
           export ARCH=arm64
+          # Tao config tu file mac dinh angelica
           make O=out angelica_defconfig
           
-          # Bat cac config Docker ban da yeu cau
+          # He thong tu dong "nap" config Docker vao
           ./scripts/config --file out/.config --enable CONFIG_CGROUPS
           ./scripts/config --file out/.config --enable CONFIG_CGROUP_DEVICE
           ./scripts/config --file out/.config --enable CONFIG_CGROUP_FREEZER
@@ -48,27 +50,28 @@ jobs:
           
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 5. Start Make (Native Build)
+      - name: 5. Start Make (Native Build - Fix Linker Error)
         run: |
           export PATH=$(pwd)/clang-bin/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # Su dung cac flags de "va" loi tu dong khi dang build
+          # Loai bo cac flag gay loi 'unknown argument' trong anh log cua ban
+          # Tap trung vao viec build "Tho" de tranh xung dot linker
           make -j$(nproc) O=out \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             LD=ld.lld \
-            KBUILD_CFLAGS="-w -O2 -fno-stack-protector -Wno-error" \
+            KBUILD_CFLAGS="-w -fno-stack-protector -Wno-error" \
             HOSTCFLAGS="-w" \
-            HOSTLDFLAGS="-fuse-ld=lld -Wl,--no-relr-pack"
+            HOSTLDFLAGS="-fuse-ld=lld" || (echo "Build loi j$(nproc), thu lai voi j1..." && make -j1 O=out CC=clang CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld KCFLAGS="-w")
 
-      - name: 6. Luu file Image
+      - name: 6. Luu Kernel (Image.gz-dtb)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Redmi9C-Docker-Ready
+          name: Kernel-Redmi9C-Docker
           path: |
             out/arch/arm64/boot/Image.gz-dtb
             out/.config
