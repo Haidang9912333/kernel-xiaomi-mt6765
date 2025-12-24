@@ -1,10 +1,10 @@
-name: Build Kernel Redmi 9C - Safe Mode
+name: Build Kernel Redmi 9C - Minimal Docker
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -12,46 +12,44 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu libelf-dev clang lld
+          sudo apt install -y bc build-essential flex bison libssl-dev libncurses5-dev rsync gcc-aarch64-linux-gnu libelf-dev
 
-      - name: Patch & Bypass (Vá lỗi và Bỏ qua Driver lỗi)
+      - name: Brutal Patch (Cắt bỏ driver lỗi)
         run: |
-          # 1. Sửa lỗi DTC
+          # 1. Sửa lỗi DTC kinh điển
           find scripts/dtc/ -name "*.l" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
           find scripts/dtc/ -name "*.c_shipped" -exec sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' {} +
           
-          # 2. Tắt STACKPROTECTOR và ép CONFIG_DEBUG_SECTION_MISMATCH để tránh treo
+          # 2. Tắt STACKPROTECTOR
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' arch/arm64/configs/angelica_defconfig || true
-          
-          # 3. CHIẾN THUẬT AN TOÀN: Nếu driver nào thiếu file .h, ta sẽ "tắt" nó đi trong config
-          # Điều này giúp tránh Bootloop do driver lỗi
-          echo "CONFIG_DRM_MEDIATEK=n" >> arch/arm64/configs/angelica_defconfig
-          echo "CONFIG_MTK_VIDEO_XLOG=n" >> arch/arm64/configs/angelica_defconfig
 
-      - name: Build Kernel (Sử dụng Clang)
+          # 3. LOẠI BỎ CÁC MODULE GÂY BOOTLOOP VÀ LỖI (Quan trọng nhất)
+          # Chúng ta tắt các driver MediaTek bị thiếu file .h trong ảnh 7:57 của bạn
+          echo "CONFIG_MTK_VIDEO_XLOG=n" >> arch/arm64/configs/angelica_defconfig
+          echo "CONFIG_DRM_MEDIATEK=n" >> arch/arm64/configs/angelica_defconfig
+          echo "CONFIG_MTK_COMPOSER_WITH_SECURE_OS_SUPPORT=n" >> arch/arm64/configs/angelica_defconfig
+
+      - name: Build Kernel
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=clang
           
-          make clean
-          make mrproper
           make angelica_defconfig
+          # Ép tắt bảo mật để trình biên dịch GCC 11 chấp nhận
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' .config
           
-          # Build bất chấp lỗi driver lẻ (-k)
-          # Clang giúp xử lý các lỗi cú pháp tốt hơn GCC
-          make -j$(nproc) CC=clang CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="-w -fcommon -fno-stack-protector" -k || true
+          # Build với cờ -k để lướt qua mọi driver lẻ bị lỗi
+          make -k -j$(nproc) KCFLAGS="-w -fcommon -fno-stack-protector -std=gnu89" || true
 
-      - name: Check & Harvest
+      - name: Harvest Image (Thu hoạch nhân)
         run: |
-          mkdir -p final_zip
-          # Tìm mọi file nhân đã thành hình
-          find arch/arm64/boot/ -name "Image*" -exec cp {} final_zip/ \;
-          find arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} final_zip/ \;
-          ls -R final_zip/
+          mkdir -p final_output
+          # Tìm file Image và nén lại thủ công nếu cần
+          find arch/arm64/boot/ -name "Image*" -exec cp {} final_output/ \;
+          ls -lh final_output/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_Redmi9C_SafeBuild
-          path: final_zip/*
+          name: Kernel_Redmi9C_Minimal
+          path: final_output/*
