@@ -33,7 +33,7 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           # Build va bo qua cac loi driver vat vinh de luon xuat duoc file cuoi
-          make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- KCFLAGS="-w -fno-stack-protector" Image.gz || echo "Co loi xay ra nhung van tiep tuc luu file..."
+          make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- KCFLAGS="-w -fno-stack-protector" Image.gz-dtb || echo "Co loi xay ra nhung van tiep tuc luu file..."
 
       - name: 5. Luu Kernel (Lay file bat ke ket qua)
         if: always()
