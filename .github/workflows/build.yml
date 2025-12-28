@@ -33,33 +33,35 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           make O=out angelica_defconfig
           
-          # --- FIX LOI MANG NAT (Sua loi addrtype va PREROUTING) ---
-          ./scripts/config --file out/.config --enable CONFIG_NETFILTER
-          ./scripts/config --file out/.config --enable CONFIG_NETFILTER_ADVANCED
-          ./scripts/config --file out/.config --enable CONFIG_NETFILTER_XT_MATCH_ADDRTYPE
-          ./scripts/config --file out/.config --enable CONFIG_IP_NF_IPTABLES
-          ./scripts/config --file out/.config --enable CONFIG_IP_NF_NAT
-          ./scripts/config --file out/.config --enable CONFIG_IP_NF_TARGET_MASQUERADE
-          ./scripts/config --file out/.config --enable CONFIG_BRIDGE_NETFILTER
-          
-          # --- FIX CAC MUC BI DO (MISSING) TRONG TERMUX ---
-          ./scripts/config --file out/.config --enable CONFIG_CGROUP_PIDS
-          ./scripts/config --file out/.config --enable CONFIG_CGROUP_DEVICE
-          ./scripts/config --file out/.config --enable CONFIG_CPUSETS
-          ./scripts/config --file out/.config --enable CONFIG_MEMCG
-          ./scripts/config --file out/.config --enable CONFIG_VETH
-          ./scripts/config --file out/.config --enable CONFIG_BRIDGE
-          ./scripts/config --file out/.config --enable CONFIG_OVERLAY_FS
-          
+CONF=arch/arm64/configs/angelica_defconfig
+          # Bật Docker nhưng giữ nguyên các thiết lập mặc định khác
+          cat <<EOF >> $CONF
+          CONFIG_NAMESPACES=y
+          CONFIG_NET_NS=y
+          CONFIG_PID_NS=y
+          CONFIG_IPC_NS=y
+          CONFIG_UTS_NS=y
+          CONFIG_CGROUPS=y
+          CONFIG_CGROUP_CPUACCT=y
+          CONFIG_CGROUP_DEVICE=y
+          CONFIG_CGROUP_FREEZER=y
+          CONFIG_CGROUP_SCHED=y
+          CONFIG_CPUSETS=y
+          CONFIG_BRIDGE=y
+          CONFIG_VETH=y
+          CONFIG_IKCONFIG=y
+          CONFIG_IKCONFIG_PROC=y
+          EOF
+
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 4. Chay Make (Lay file Image.gz-dtb)
+      - name: 4. Chay Make (Lay file Image.gz)
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           # Build va bo qua cac loi driver vat vinh de luon xuat duoc file cuoi
-          make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- KCFLAGS="-w -fno-stack-protector" Image.gz-dtb || echo "Co loi xay ra nhung van tiep tuc luu file..."
+          make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- KCFLAGS="-w -fno-stack-protector" Image.gz || echo "Co loi xay ra nhung van tiep tuc luu file..."
 
       - name: 5. Luu Kernel (Lay file bat ke ket qua)
         if: always()
@@ -67,5 +69,5 @@ jobs:
         with:
           name: Kernel-Redmi9C-Docker-Fixed
           path: |
-            out/arch/arm64/boot/Image.gz-dtb
+            out/arch/arm64/boot/Image.gz
             out/.config
